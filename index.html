@@ -1084,14 +1084,20 @@
 
     let lastEndH = null, lastEndM = null, lastLabel = '';
 
+    // __ADMIN_DATA_START__
+    let durationOverrides = {};
+    let versionHistory = [];
+    // __ADMIN_DATA_END__
+
     function calc(mins, label) {
+        const actualMins = durationOverrides[label] !== undefined ? durationOverrides[label] : mins;
         const p = tin.value.split(':');
         const dt = new Date();
-        dt.setHours(parseInt(p[0]), parseInt(p[1]) + mins, 0, 0);
+        dt.setHours(parseInt(p[0]), parseInt(p[1]) + actualMins, 0, 0);
         lastEndH = dt.getHours();
         lastEndM = dt.getMinutes();
         lastLabel = label;
-        document.getElementById('res-fach').textContent = label;
+        document.getElementById('res-fach').textContent = label + (durationOverrides[label] !== undefined ? ' ✎' : '');
         document.getElementById('res-t').textContent =
             String(lastEndH).padStart(2, '0') + ':' +
             String(lastEndM).padStart(2, '0') + ' Uhr';
@@ -1122,5 +1128,372 @@
         document.getElementById('overlay').classList.remove('visible');
     }
 </script>
+
+<!-- ADMIN BUTTON -->
+<div style="text-align:center; padding:6px 0 24px;">
+    <button onclick="openAdminLogin()" style="background:none; border:none; font-size:0.62rem; color:#ccc; cursor:pointer; text-decoration:underline; -webkit-tap-highlight-color:transparent;">Admin</button>
+</div>
+
+<!-- ADMIN OVERLAY -->
+<div id="admin-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:10000; overflow-y:auto; -webkit-overflow-scrolling:touch;">
+    <div style="background:#fff; max-width:520px; margin:20px auto 40px; border-radius:18px; overflow:hidden; box-shadow:0 10px 40px rgba(0,0,0,0.25);">
+
+        <!-- Login -->
+        <div id="admin-login" style="padding:32px 24px; text-align:center;">
+            <div style="font-size:1.1rem; font-weight:800; color:#1a1a1a; margin-bottom:4px;">🔐 Admin-Modus</div>
+            <div style="font-size:0.75rem; color:#999; margin-bottom:22px;">Klausurdauer bearbeiten</div>
+            <input type="password" id="admin-pw" placeholder="Passwort"
+                style="width:100%; padding:12px; border:1.5px solid #ddd; border-radius:10px; font-size:1rem; text-align:center; outline:none; margin-bottom:10px; box-sizing:border-box;"
+                onkeydown="if(event.key==='Enter') checkPassword()">
+            <button onclick="checkPassword()"
+                style="width:100%; padding:12px; background:#a32323; color:#fff; border:none; border-radius:10px; font-size:1rem; font-weight:700; cursor:pointer; margin-bottom:8px;">
+                Anmelden
+            </button>
+            <div id="pw-error" style="color:#a32323; font-size:0.75rem; margin-bottom:8px; display:none;">❌ Falsches Passwort.</div>
+            <button onclick="closeAdmin()" style="background:none; border:none; color:#aaa; font-size:0.82rem; cursor:pointer;">Abbrechen</button>
+        </div>
+
+        <!-- Edit panel -->
+        <div id="admin-edit" style="display:none;">
+            <div style="background:#a32323; color:#fff; padding:15px 18px; display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-weight:700; font-size:0.95rem;">🔓 Admin-Modus</span>
+                <button onclick="closeAdmin()" style="background:rgba(255,255,255,0.2); border:none; color:#fff; padding:5px 13px; border-radius:20px; font-size:0.78rem; cursor:pointer;">Beenden</button>
+            </div>
+
+            <div style="padding:16px;">
+                <!-- Kürzel -->
+                <div style="margin-bottom:14px;">
+                    <label style="font-size:0.68rem; font-weight:700; color:#63666a; text-transform:uppercase; letter-spacing:0.05em; display:block; margin-bottom:5px;">Lehrkraft-Kürzel (4 Zeichen)</label>
+                    <input type="text" id="admin-kuerzel" maxlength="4" placeholder="ABCD"
+                        style="width:100%; padding:11px 14px; border:2px solid #eecaca; border-radius:9px; font-size:1.1rem; font-weight:800; text-transform:uppercase; text-align:center; letter-spacing:0.15em; outline:none; box-sizing:border-box;">
+                </div>
+
+<!-- List -->
+                <div id="admin-list" style="max-height:320px; overflow-y:auto; border:1px solid #eee; border-radius:10px; margin-bottom:14px;"></div>
+
+                <!-- Info notice -->
+                <div style="background:#fff8e1; border:1px solid #ffe082; border-radius:10px; padding:12px 14px; font-size:0.72rem; color:#5d4037; line-height:1.55; margin-bottom:14px;">
+                    ℹ️ <strong>Wichtig:</strong> Änderungen gelten zunächst nur lokal in diesem Browser. Lade die exportierte HTML-Datei herunter und schicke sie an die <strong>digitale Verwaltung</strong> mit der Bitte, die aktuelle Datei auf dem Server auszutauschen. Ansonsten bleibt die Änderung lokal.
+                </div>
+
+                <!-- Export -->
+                <button onclick="exportHTML()"
+                    style="width:100%; padding:13px; background:#a32323; color:#fff; border:none; border-radius:10px; font-size:0.95rem; font-weight:700; cursor:pointer; margin-bottom:16px;">
+                    ⬇ HTML exportieren &amp; herunterladen
+                </button>
+
+                <!-- History -->
+                <div style="margin-bottom:8px;">
+                    <div style="font-size:0.68rem; font-weight:700; color:#63666a; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px; padding-bottom:4px; border-bottom:1px solid #eee;">Versionshistorie</div>
+                    <div id="admin-history" style="max-height:220px; overflow-y:auto; font-size:0.75rem; color:#555;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+
+
+<script>
+// ===================== ADMIN =====================
+const ADMIN_PASSWORD = 'NCG2026'; // Hier ändern
+
+const ADMIN_GROUPS = [
+    { id:'I',     name:'I \u2013 Sprachlich \u00b7 Literarisch \u00b7 K\u00fcnstlerisch',
+      faecher:['Deutsch','Englisch','Latein','Frz.','Spanisch','Hebr\u00e4isch','Musik','Kunst'] },
+    { id:'II',    name:'II \u2013 Gesellschaftswissenschaftlich',
+      faecher:['Erdkunde','Geschichte','SoWi','P\u00e4dagogik','Philosophie','Religion'] },
+    { id:'III',   name:'III \u2013 Mathematisch \u00b7 Naturwissenschaftlich',
+      faecher:['Mathe','Bio','Physik','Chemie','Informatik'] },
+    { id:'Sport', name:'Sport', faecher:['Sport'] }
+];
+const FACH_DISPLAY = {
+    'Frz.':'Franz\u00f6sisch','SoWi':'Sozialwissenschaften',
+    'Religion':'Religionslehre','Mathe':'Mathematik','Bio':'Biologie'
+};
+
+function openAdminLogin() {
+    document.getElementById('admin-overlay').style.display = 'block';
+    document.getElementById('admin-login').style.display = 'block';
+    document.getElementById('admin-edit').style.display = 'none';
+    document.getElementById('pw-error').style.display = 'none';
+    document.getElementById('admin-pw').value = '';
+    setTimeout(function(){ document.getElementById('admin-pw').focus(); }, 100);
+}
+
+function checkPassword() {
+    if (document.getElementById('admin-pw').value === ADMIN_PASSWORD) {
+        document.getElementById('admin-login').style.display = 'none';
+        document.getElementById('admin-edit').style.display = 'block';
+        buildAdminHierarchy();
+        renderHistory();
+    } else {
+        document.getElementById('pw-error').style.display = 'block';
+        document.getElementById('admin-pw').value = '';
+        document.getElementById('admin-pw').focus();
+    }
+}
+
+function closeAdmin() {
+    document.getElementById('admin-overlay').style.display = 'none';
+}
+
+function getAllEntries() {
+    var seen = {}, entries = [];
+    document.querySelectorAll('[onclick^="calc("]').forEach(function(btn) {
+        var m = btn.getAttribute('onclick').match(/calc\((\d+),'([^']+)'\)/);
+        if (!m || seen[m[2]]) return;
+        seen[m[2]] = true;
+        entries.push({ label: m[2], original: parseInt(m[1]) });
+    });
+    return entries;
+}
+
+// ---- Build hierarchy ----
+function buildAdminHierarchy() {
+    var entries = getAllEntries();
+    var byFach = {};
+    entries.forEach(function(e) {
+        var m = e.label.match(/^(.+?) (GK|LK) \u00b7 (EF|Q1|Q2) (.+)$/);
+        if (!m) return;
+        var fach = m[1], kurs = m[2], phase = m[3], hj = m[4];
+        if (!byFach[fach]) byFach[fach] = {};
+        if (!byFach[fach][phase]) byFach[fach][phase] = [];
+        byFach[fach][phase].push({ kurs:kurs, hj:hj, label:e.label, original:e.original });
+    });
+
+    var container = document.getElementById('admin-list');
+    container.innerHTML = '';
+
+    ADMIN_GROUPS.forEach(function(group) {
+        var hasFaecher = group.faecher.some(function(f){ return byFach[f]; });
+        if (!hasFaecher) return;
+
+        var groupWrap = document.createElement('div');
+        groupWrap.style.cssText = 'margin-bottom:6px;';
+
+        var groupHead = document.createElement('button');
+        groupHead.style.cssText = 'width:100%;padding:9px 12px;background:#f5f5f5;border:none;border-radius:8px;text-align:left;font-size:0.72rem;font-weight:800;color:#63666a;text-transform:uppercase;letter-spacing:0.05em;display:flex;justify-content:space-between;align-items:center;cursor:pointer;';
+        groupHead.innerHTML = '<span>' + group.name + '</span><span class="adm-arr" style="transition:transform 0.2s;font-size:0.65rem;">▼</span>';
+
+        var groupBody = document.createElement('div');
+        groupBody.style.cssText = 'display:none;padding:4px 0 0 0;';
+
+        groupHead.onclick = function() {
+            var open = groupBody.style.display !== 'none';
+            groupBody.style.display = open ? 'none' : 'block';
+            groupHead.querySelector('.adm-arr').style.transform = open ? '' : 'rotate(180deg)';
+        };
+
+        group.faecher.forEach(function(fach) {
+            if (!byFach[fach]) return;
+            var displayName = FACH_DISPLAY[fach] || fach;
+
+            var fachWrap = document.createElement('div');
+            fachWrap.style.cssText = 'border:1px solid #e8e8e8;border-radius:8px;margin-bottom:5px;overflow:hidden;';
+
+            var fachHead = document.createElement('button');
+            fachHead.style.cssText = 'width:100%;padding:9px 12px;background:#fff;border:none;text-align:left;font-size:0.88rem;font-weight:600;color:#1a1a1a;display:flex;justify-content:space-between;align-items:center;cursor:pointer;';
+            fachHead.innerHTML = '<span>' + displayName + '</span><span class="adm-arr" style="transition:transform 0.2s;font-size:0.65rem;color:#aaa;">▼</span>';
+
+            var fachBody = document.createElement('div');
+            fachBody.style.cssText = 'display:none;padding:10px;background:#fafafa;border-top:1px solid #f0f0f0;';
+            var built = false;
+
+            fachHead.onclick = function() {
+                var open = fachBody.style.display !== 'none';
+                fachBody.style.display = open ? 'none' : 'block';
+                fachHead.querySelector('.adm-arr').style.transform = open ? '' : 'rotate(180deg)';
+                if (!open && !built) {
+                    fachBody.appendChild(buildPhaseRows(byFach[fach]));
+                    built = true;
+                }
+            };
+
+            fachWrap.appendChild(fachHead);
+            fachWrap.appendChild(fachBody);
+            groupBody.appendChild(fachWrap);
+        });
+
+        groupWrap.appendChild(groupHead);
+        groupWrap.appendChild(groupBody);
+        container.appendChild(groupWrap);
+    });
+}
+
+function buildPhaseRows(phaseData) {
+    var el = document.createElement('div');
+    var phaseColors = {
+        EF:  { bg:'#e8eaf6', color:'#3949ab' },
+        Q1:  { bg:'#e8f5e9', color:'#2e7d32' },
+        Q2:  { bg:'#fff3e0', color:'#bf360c' }
+    };
+
+    ['EF','Q1','Q2'].forEach(function(phase) {
+        if (!phaseData[phase]) return;
+
+        var phaseEl = document.createElement('div');
+        phaseEl.style.cssText = 'margin-bottom:10px;';
+
+        var badge = document.createElement('span');
+        badge.style.cssText = 'font-size:0.65rem;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;padding:2px 8px;border-radius:4px;display:inline-block;margin-bottom:6px;background:' + phaseColors[phase].bg + ';color:' + phaseColors[phase].color + ';';
+        badge.textContent = phase;
+        phaseEl.appendChild(badge);
+
+        var grid = document.createElement('div');
+        grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:5px;';
+
+        var sorted = phaseData[phase].slice().sort(function(a,b) {
+            if (a.kurs !== b.kurs) return a.kurs === 'GK' ? -1 : 1;
+            return a.hj < b.hj ? -1 : 1;
+        });
+
+        sorted.forEach(function(entry) {
+            var current = durationOverrides[entry.label] !== undefined ? durationOverrides[entry.label] : entry.original;
+            var overridden = durationOverrides[entry.label] !== undefined;
+            var cell = document.createElement('div');
+            cell.style.cssText = 'background:#fff;border:1.5px solid ' + (overridden ? '#a32323' : '#e0e0e0') + ';border-radius:8px;padding:7px 10px;cursor:pointer;min-width:68px;text-align:center;';
+            cell.title = 'Tippen zum Bearbeiten';
+
+            var tag = document.createElement('div');
+            tag.style.cssText = 'font-size:0.56rem;font-weight:700;color:' + (entry.kurs === 'LK' ? '#a32323' : '#888') + ';text-transform:uppercase;margin-bottom:2px;';
+            tag.textContent = entry.kurs + ' ' + (entry.hj.indexOf('1') !== -1 ? '1.Hj' : '2.Hj');
+            cell.appendChild(tag);
+
+            var val = document.createElement('div');
+            val.style.cssText = 'font-size:1rem;font-weight:800;color:' + (overridden ? '#a32323' : '#333') + ';';
+            val.textContent = current + "'";
+            cell.appendChild(val);
+
+            if (overridden) {
+                var orig = document.createElement('div');
+                orig.style.cssText = 'font-size:0.55rem;color:#ccc;text-decoration:line-through;';
+                orig.textContent = entry.original + "'";
+                cell.appendChild(orig);
+            }
+
+            (function(lbl, origi) {
+                cell.onclick = function() { startEdit(lbl, origi); };
+            })(entry.label, entry.original);
+
+            grid.appendChild(cell);
+        });
+
+        phaseEl.appendChild(grid);
+        el.appendChild(phaseEl);
+    });
+    return el;
+}
+
+// ---- Inline edit modal ----
+var _editLabel = null, _editOriginal = 0;
+
+function startEdit(label, original) {
+    _editLabel = label;
+    _editOriginal = original;
+    var current = durationOverrides[label] !== undefined ? durationOverrides[label] : original;
+
+    var modal = document.createElement('div');
+    modal.id = 'edit-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:20000;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
+
+    var inner = document.createElement('div');
+    inner.style.cssText = 'background:#fff;border-radius:16px;padding:24px;max-width:300px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.25);';
+
+    var lbl = document.createElement('div');
+    lbl.style.cssText = 'font-size:0.75rem;color:#888;margin-bottom:4px;line-height:1.4;';
+    lbl.textContent = label;
+
+    var origDiv = document.createElement('div');
+    origDiv.style.cssText = 'font-size:0.7rem;color:#ccc;margin-bottom:14px;';
+    origDiv.textContent = 'Original: ' + original + "'";
+
+    var inp = document.createElement('input');
+    inp.type = 'number'; inp.id = 'edit-val';
+    inp.value = current; inp.min = 1; inp.max = 600;
+    inp.style.cssText = 'width:100%;padding:12px;border:2px solid #eecaca;border-radius:8px;font-size:1.8rem;font-weight:800;text-align:center;color:#a32323;outline:none;margin-bottom:6px;box-sizing:border-box;';
+    inp.onkeydown = function(e){ if(e.key==='Enter') confirmEdit(); };
+
+    var hint = document.createElement('div');
+    hint.style.cssText = 'font-size:0.68rem;color:#aaa;text-align:center;margin-bottom:14px;';
+    hint.textContent = 'Minuten';
+
+    var saveBtn = document.createElement('button');
+    saveBtn.style.cssText = 'width:100%;padding:12px;background:#a32323;color:#fff;border:none;border-radius:10px;font-size:0.95rem;font-weight:700;cursor:pointer;margin-bottom:8px;';
+    saveBtn.textContent = '\u2713 Speichern';
+    saveBtn.onclick = confirmEdit;
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.style.cssText = 'width:100%;padding:10px;background:#f0f0f0;color:#555;border:none;border-radius:10px;font-size:0.88rem;cursor:pointer;';
+    cancelBtn.textContent = 'Abbrechen';
+    cancelBtn.onclick = function(){ modal.remove(); };
+
+    [lbl, origDiv, inp, hint, saveBtn, cancelBtn].forEach(function(el){ inner.appendChild(el); });
+    modal.appendChild(inner);
+    document.body.appendChild(modal);
+    setTimeout(function(){ inp.select(); }, 80);
+}
+
+function confirmEdit() {
+    var kuerzel = document.getElementById('admin-kuerzel').value.trim().toUpperCase();
+    var modal = document.getElementById('edit-modal');
+    if (!kuerzel || kuerzel.length !== 4) {
+        if (modal) modal.remove();
+        alert('Bitte zuerst ein 4-stelliges K\u00fcrzel eingeben!');
+        document.getElementById('admin-kuerzel').focus();
+        return;
+    }
+    var newVal = parseInt(document.getElementById('edit-val').value);
+    if (isNaN(newVal) || newVal < 1) return;
+    var oldVal = durationOverrides[_editLabel] !== undefined ? durationOverrides[_editLabel] : _editOriginal;
+    durationOverrides[_editLabel] = newVal;
+    var now = new Date();
+    versionHistory.unshift({
+        date: now.toLocaleDateString('de-DE') + ' ' + now.toLocaleTimeString('de-DE', {hour:'2-digit',minute:'2-digit'}),
+        kuerzel: kuerzel, label: _editLabel, oldVal: oldVal, newVal: newVal
+    });
+    if (modal) modal.remove();
+    buildAdminHierarchy();
+    renderHistory();
+}
+
+// ---- History ----
+function renderHistory() {
+    var el = document.getElementById('admin-history');
+    if (!versionHistory.length) {
+        el.innerHTML = '<div style="color:#ccc;font-style:italic;padding:4px 0;">Noch keine \u00c4nderungen.</div>';
+        return;
+    }
+    el.innerHTML = versionHistory.map(function(e) {
+        return '<div style="padding:8px 0;border-bottom:1px solid #f5f5f5;">'
+            + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">'
+            + '<span style="font-weight:800;color:#a32323;letter-spacing:0.08em;">' + e.kuerzel + '</span>'
+            + '<span style="color:#bbb;font-size:0.65rem;">' + e.date + '</span>'
+            + '</div>'
+            + '<div style="color:#444;">' + e.label + ': '
+            + '<span style="text-decoration:line-through;color:#bbb;">' + e.oldVal + "'</span>"
+            + ' &rarr; <span style="font-weight:700;color:#a32323;">' + e.newVal + "'</span></div>"
+            + '</div>';
+    }).join('');
+}
+
+// ---- Export ----
+function exportHTML() {
+    var src = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+    src = src.replace(
+        /\/\/ __ADMIN_DATA_START__[\s\S]*?\/\/ __ADMIN_DATA_END__/,
+        '// __ADMIN_DATA_START__\n    let durationOverrides = ' + JSON.stringify(durationOverrides) + ';\n    let versionHistory = ' + JSON.stringify(versionHistory) + ';\n    // __ADMIN_DATA_END__'
+    );
+    var blob = new Blob([src], { type: 'text/html;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'klausurrechner-ncg.html';
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+// ===================== END ADMIN =====================
+</script>
+
 </body>
 </html>
