@@ -465,11 +465,16 @@
                 </div>
             </div>
             <div style="margin-top:10px; padding-top:10px; border-top:1px dashed #e0c8c8;">
-                <button class="time-btn" style="width:100%; flex-direction:row; justify-content:center; gap:8px; background:#fdf2f2; border-color:#e8c0c0; padding:12px;" onclick="addPraxis()">
+                <div style="display:flex; gap:8px;">
+                <button class="time-btn" style="flex:1; flex-direction:row; justify-content:center; gap:8px; background:#fdf2f2; border-color:#e8c0c0; padding:12px;" onclick="addPraxis(45,'EF')">
                     <span style="font-size:1.2rem;">🎨</span>
-                    <span class="mins">Praxis: +60'</span>
-                    <span class="hj" style="color:#a32323;">zur Abgabezeit addieren</span>
+                    <span class="mins">Praxis EF: +45'</span>
                 </button>
+                <button class="time-btn" style="flex:1; flex-direction:row; justify-content:center; gap:8px; background:#fdf2f2; border-color:#e8c0c0; padding:12px;" onclick="addPraxis(60,'Q1/Q2')">
+                    <span style="font-size:1.2rem;">🎨</span>
+                    <span class="mins">Praxis Q1/Q2: +60'</span>
+                </button>
+                </div>
             </div>
         </div>
     </div>
@@ -1089,43 +1094,53 @@
     let versionHistory = [];
     // __ADMIN_DATA_END__
 
-    function calc(mins, label) {
-        const actualMins = durationOverrides[label] !== undefined ? durationOverrides[label] : mins;
+    // Zustand der aktuell angezeigten Berechnung (für Live-Update)
+    let state = null; // { mins, label, praxis, praxisLabel }
+
+    function render() {
+        if (!state) return;
         const p = tin.value.split(':');
+        if (p.length !== 2 || isNaN(parseInt(p[0])) || isNaN(parseInt(p[1]))) return;
+        const ov = state.label !== null && durationOverrides[state.label] !== undefined;
+        const base = state.label === null ? 0 : (ov ? durationOverrides[state.label] : state.mins);
         const dt = new Date();
-        dt.setHours(parseInt(p[0]), parseInt(p[1]) + actualMins, 0, 0);
+        dt.setHours(parseInt(p[0]), parseInt(p[1]) + base + state.praxis, 0, 0);
         lastEndH = dt.getHours();
         lastEndM = dt.getMinutes();
-        lastLabel = label;
-        document.getElementById('res-fach').textContent = label + (durationOverrides[label] !== undefined ? ' ✎' : '');
+        let name = state.label === null ? 'Kunst (nur Praxis)' : state.label;
+        lastLabel = name;
+        document.getElementById('res-fach').textContent =
+            name + (ov ? ' ✎' : '') + (state.praxis ? ' + Praxis (' + state.praxis + "')" : '');
         document.getElementById('res-t').textContent =
-            String(lastEndH).padStart(2, '0') + ':' +
-            String(lastEndM).padStart(2, '0') + ' Uhr';
+            String(lastEndH).padStart(2, '0') + ':' + String(lastEndM).padStart(2, '0') + ' Uhr';
+    }
+
+    function show() {
+        render();
         document.getElementById('overlay').classList.add('visible');
     }
 
-    function addPraxis() {
-        let h, m;
-        if (lastEndH === null) {
-            const p = tin.value.split(':');
-            const dt = new Date();
-            dt.setHours(parseInt(p[0]), parseInt(p[1]) + 60, 0, 0);
-            h = dt.getHours(); m = dt.getMinutes();
-            lastLabel = 'Kunst (nur Praxis)';
-        } else {
-            const dt = new Date();
-            dt.setHours(lastEndH, lastEndM + 60, 0, 0);
-            h = dt.getHours(); m = dt.getMinutes();
-        }
-        lastEndH = h; lastEndM = m;
-        document.getElementById('res-fach').textContent = lastLabel + ' + Praxis';
-        document.getElementById('res-t').textContent =
-            String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ' Uhr';
-        document.getElementById('overlay').classList.add('visible');
+    function calc(mins, label) {
+        state = { mins: mins, label: label, praxis: 0 };
+        show();
     }
+
+    function addPraxis(pm, stufe) {
+        if (!state) state = { mins: 0, label: null, praxis: 0 };
+        // Praxiszeit je Stufe: EF 45', Q-Phase 60' (ersetzt eine evtl. bereits addierte Praxis)
+        state.praxis = pm;
+        show();
+    }
+
+    // Live-Update, solange die Abgabezeit angezeigt wird
+    ['input', 'change'].forEach(function (ev) {
+        tin.addEventListener(ev, render);
+        tsl.addEventListener(ev, render);
+    });
 
     function closeOverlay() {
         document.getElementById('overlay').classList.remove('visible');
+        state = null;
     }
 </script>
 
